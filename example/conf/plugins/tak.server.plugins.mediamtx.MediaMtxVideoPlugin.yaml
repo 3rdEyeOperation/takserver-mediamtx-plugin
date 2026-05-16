@@ -1,0 +1,38 @@
+# Example plugin configuration for tak.server.plugins.mediamtx.MediaMtxVideoPlugin.
+#
+# Copy this file to TAK Server's plugin manager working directory at:
+#   conf/plugins/tak.server.plugins.mediamtx.MediaMtxVideoPlugin.yaml
+#
+# Reserved keys 'server', 'tak', and 'system' are stripped by the plugin
+# framework, so all configuration here lives under custom namespaces.
+
+# --- MediaMTX HTTP API -------------------------------------------------------
+mediamtx:
+  apiUrl: http://127.0.0.1:9997
+  # username: admin           # uncomment if MediaMTX API auth is enabled
+  # password: changeme
+  pageSize: 100
+  onlyReady: true             # only publish streams currently ready/online
+
+# --- How ATAK clients should reach the MediaMTX media plane ------------------
+# These values become the protocol/address/port/path on each TAK Server feed.
+stream:
+  protocol: rtsp              # rtsp | rtsps | rtmp | rtmps | hls | http | srt
+  host: mediamtx.example.com
+  port: 8554
+  # classification: UNCLASSIFIED
+
+# --- TAK Server video manager endpoint ---------------------------------------
+takserver:
+  vcmUrl: https://takserver.example.com:8443/Marti/vcm
+  # Provide EITHER a username/password OR a PKCS#12 / JKS client certificate.
+  # username: admin
+  # password: changeme
+  # clientCertPath: /opt/tak/certs/files/admin.p12
+  # clientCertPassword: atakatak
+  # trustStorePath: /opt/tak/certs/files/truststore-root.jks
+  # trustStorePassword: atakatak
+  trustAll: false             # set true ONLY for local development
+
+# How often (seconds) to re-sync MediaMTX -> TAK Server.
+pollIntervalSeconds: 30
