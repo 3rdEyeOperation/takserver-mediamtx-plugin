@@ -1,0 +1,144 @@
+plugins {
+    id 'java'
+    // com.gradleup.shadow is the maintained fork of johnrengelman.shadow and
+    // supports modern Gradle versions (>= 8).
+    id 'com.gradleup.shadow' version '8.3.5'
+}
+
+group = 'com.thirdeye.takserver.plugins'
+version = project.findProperty('pluginVersion') ?: '0.1.0'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
+
+repositories {
+    mavenLocal()
+    mavenCentral()
+}
+
+// Separate compile-only source set that mirrors just enough of the
+// `gov.tak:takserver-plugins` SDK for this plugin to compile in isolation.
+// At runtime the TAK Server Plugin Manager classloader supplies the real
+// classes, so the stub .class files are intentionally NOT shipped in the
+// shaded plugin JAR (see shadowJar exclude below).
+sourceSets {
+    sdkStubs {
+        java {
+            srcDirs = ['src/sdkStubs/java']
+        }
+    }
+}
+
+dependencies {
+    // SDK stubs only on the compile classpath of the main + test source sets.
+    compileOnly sourceSets.sdkStubs.output
+    testCompileOnly sourceSets.sdkStubs.output
+    testRuntimeOnly sourceSets.sdkStubs.output
+
+    // JAXB API: provided at runtime by the plugin manager (TAK Server uses
+    // jakarta.xml.bind-api), but we mark it implementation so the jaxb
+    // runtime we ship can resolve it standalone if needed.
+    implementation 'jakarta.xml.bind:jakarta.xml.bind-api:4.0.2'
+
+    // SLF4J API is provided by the runtime.
+    compileOnly "org.slf4j:slf4j-api:${slf4jVersion}"
+    testRuntimeOnly "org.slf4j:slf4j-simple:${slf4jVersion}"
+    testImplementation "org.slf4j:slf4j-api:${slf4jVersion}"
+
+    // Jackson for parsing MediaMTX JSON responses (shaded into the plugin JAR).
+    implementation "com.fasterxml.jackson.core:jackson-databind:${jacksonVersion}"
+    implementation "com.fasterxml.jackson.core:jackson-core:${jacksonVersion}"
+    implementation "com.fasterxml.jackson.core:jackson-annotations:${jacksonVersion}"
+
+    // JAXB runtime bundled so the plugin can marshal VideoConnections XML
+    // without depending on whatever the plugin manager exposes.
+    implementation 'org.glassfish.jaxb:jaxb-runtime:4.0.5'
+
+    // Tests
+    testImplementation "org.junit.jupiter:junit-jupiter:${junitVersion}"
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+    useJUnitPlatform()
+    testLogging {
+        events 'failed'
+        showStandardStreams = false
+    }
+}
+
+// Generate a ver.json resource consumed by the TAK Server Plugin Manager to
+// populate the plugin version field.
+def verJsonDir = layout.buildDirectory.dir('generated/resources')
+def generateVerJson = tasks.register('generateVerJson') {
+    outputs.dir(verJsonDir)
+    doLast {
+        def parts = version.toString().split('[.-]')
+        def major = (parts.length > 0 && parts[0].isInteger()) ? parts[0] as int : 0
+        def minor = (parts.length > 1 && parts[1].isInteger()) ? parts[1] as int : 0
+        def patch = (parts.length > 2 && parts[2].isInteger()) ? parts[2] as int : 0
+        def hash = 'local'
+        try {
+            def proc = ['git', 'rev-parse', '--short', 'HEAD'].execute(null, projectDir)
+            proc.waitFor()
+            if (proc.exitValue() == 0) {
+                hash = proc.text.trim()
+            }
+        } catch (Exception ignored) {
+            // git not available; keep default
+        }
+        def dir = verJsonDir.get().asFile
+        dir.mkdirs()
+        new File(dir, 'ver.json').text = """{
+  "major": ${major},
+  "minor": ${minor},
+  "patch": ${patch},
+  "hash": "${hash}",
+  "branch": "main"
+}
+"""
+    }
+}
+
+sourceSets {
+    main {
+        resources {
+            srcDir(verJsonDir)
+        }
+    }
+}
+
+processResources.dependsOn(generateVerJson)
+
+jar {
+    archiveBaseName.set('takserver-mediamtx-plugin')
+}
+
+shadowJar {
+    archiveBaseName.set('takserver-mediamtx-plugin')
+    archiveClassifier.set('')
+    archiveVersion.set(version.toString())
+    // Avoid clobbering signature files from shaded deps.
+    exclude 'META-INF/*.SF'
+    exclude 'META-INF/*.DSA'
+    exclude 'META-INF/*.RSA'
+    // Safety net: the stub source set is not on the main runtime classpath
+    // so its classes shouldn't be picked up here, but exclude defensively
+    // so a refactor never accidentally ships compile-only SDK stubs.
+    exclude 'tak/server/plugins/PluginBase.class'
+    exclude 'tak/server/plugins/PluginLifecycle.class'
+    exclude 'tak/server/plugins/PluginConfiguration.class'
+    exclude 'tak/server/plugins/PluginInfo.class'
+    exclude 'tak/server/plugins/MessageSender.class'
+    exclude 'tak/server/plugins/MessageSenderBase.class'
+    exclude 'tak/server/plugins/TakServerPlugin.class'
+    exclude 'tak/server/plugins/ReservedConfigurationException.class'
+    mergeServiceFiles()
+}
+
+// `gradle build` should produce the shaded plugin JAR that ships to the
+// TAK Server Plugin Manager.
+build.dependsOn shadowJar
