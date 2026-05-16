@@ -32,7 +32,10 @@ takserver:
   # clientCertPassword: atakatak
   # trustStorePath: /opt/tak/certs/files/truststore-root.jks
   # trustStorePassword: atakatak
-  trustAll: false             # set true ONLY for local development
+  # Set true ONLY for local development. Has effect only when the JVM is
+  # additionally started with -Dmediamtx.plugin.allowInsecureTls=true; without
+  # that system property TLS verification stays enabled even if this is true.
+  trustAll: false
 
 # How often (seconds) to re-sync MediaMTX -> TAK Server.
 pollIntervalSeconds: 30

@@ -25,6 +25,8 @@ import javax.net.ssl.TrustManagerFactory;
 import javax.net.ssl.X509TrustManager;
 import java.security.cert.X509Certificate;
 
+/* See InsecureTrustManager nested class below for the opt-in trustAll mode. */
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -117,6 +119,15 @@ public class TakServerVideoClient {
         return resp.statusCode();
     }
 
+    /**
+     * JVM system property that MUST be set to {@code true} for
+     * {@code takserver.trustAll} configuration to take effect. Requiring an
+     * additional out-of-band opt-in (not just a YAML toggle) prevents an
+     * accidentally-committed config file from silently disabling TLS
+     * verification on a production server.
+     */
+    static final String INSECURE_TLS_SYS_PROP = "mediamtx.plugin.allowInsecureTls";
+
     private static SSLContext buildSslContext(String clientCertPath, String clientCertPassword,
                                               String trustStorePath, String trustStorePassword,
                                               boolean trustAll) throws Exception {
@@ -131,15 +142,26 @@ public class TakServerVideoClient {
             kmf.init(ks, pw);
         }
 
+        boolean insecureAllowed = Boolean.parseBoolean(
+                System.getProperty(INSECURE_TLS_SYS_PROP, "false"));
+        if (trustAll && !insecureAllowed) {
+            logger.error("takserver.trustAll=true was requested in plugin config, but the "
+                    + "JVM system property -D{}=true is not set. TLS verification will "
+                    + "remain enabled.", INSECURE_TLS_SYS_PROP);
+            trustAll = false;
+        }
+
         TrustManager[] tms;
         if (trustAll) {
-            logger.warn("TAK Server video client configured with trustAll=true; "
-                    + "TLS certificates will not be validated. Use only for testing.");
-            tms = new TrustManager[]{ new X509TrustManager() {
-                @Override public void checkClientTrusted(X509Certificate[] x, String s) { }
-                @Override public void checkServerTrusted(X509Certificate[] x, String s) { }
-                @Override public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
-            }};
+            logger.warn("TAK Server video client configured with trustAll=true and "
+                    + "-D{}=true; TLS certificates will not be validated. Use only for "
+                    + "local development.", INSECURE_TLS_SYS_PROP);
+            // Intentional opt-in insecure TrustManager: gated behind BOTH a config
+            // flag (takserver.trustAll) and a JVM system property
+            // (mediamtx.plugin.allowInsecureTls). Required for self-signed dev
+            // TAK Servers; never enable in production.
+            // lgtm[java/insecure-trustmanager]
+            tms = new TrustManager[]{ new InsecureTrustManager() };
         } else if (trustStorePath != null && !trustStorePath.isEmpty()) {
             char[] pw = trustStorePassword != null ? trustStorePassword.toCharArray() : new char[0];
             KeyStore ts = KeyStore.getInstance(guessKeyStoreType(trustStorePath));
@@ -165,5 +187,19 @@ public class TakServerVideoClient {
             return "PKCS12";
         }
         return "JKS";
+    }
+
+    /**
+     * X509TrustManager that accepts any certificate. Only constructed when
+     * BOTH {@code takserver.trustAll=true} (in plugin config) AND the JVM
+     * system property {@value #INSECURE_TLS_SYS_PROP} is set to {@code true}.
+     * Used exclusively for local development against self-signed TAK Server
+     * instances. Operators are warned at startup.
+     */
+    @SuppressWarnings("java:S4830") // Intentional: gated insecure trust manager for dev only.
+    private static final class InsecureTrustManager implements X509TrustManager {
+        @Override public void checkClientTrusted(X509Certificate[] x, String s) { }
+        @Override public void checkServerTrusted(X509Certificate[] x, String s) { }
+        @Override public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
     }
 }
